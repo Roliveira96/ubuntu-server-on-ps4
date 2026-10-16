@@ -199,11 +199,7 @@ Sim, ele se apresenta como **kaveri**. O PS4 é parente de APU de notebook e nã
 sudo bash ps4-install-docker.sh
 ```
 
-Instala o Docker Engine e o plugin Compose pelo repositório oficial (não o `docker.io` do Ubuntu), liga o serviço e põe o usuário no grupo `docker`. Saia e entre de novo. Confira que o cgroup é o certo, porque limites de memória por container dependem disso:
-
-```sh
-docker info --format '{{.CgroupDriver}} {{.CgroupVersion}}'   # systemd 2
-```
+Instala o Docker Engine e o plugin Compose pelo repositório oficial (não o `docker.io` do Ubuntu), liga o serviço e põe o usuário no grupo `docker`. Saia e entre de novo.
 
 #### 5.5. Desktop XFCE sob demanda (opcional)
 
@@ -265,8 +261,7 @@ Passou em tudo? O PS4 agora é um servidor. Para dar um emprego a ele, veja [�
 - **Tela preta depois do payload?** Confira se o modelo é CUH-10xx/11xx/12xx e se o `bzImage` chegou inteiro (veja o `out/SHA256SUMS`).
 - **Nunca ligue o DPM da GPU.** O kernel sobe com `amdgpu.dpm=0` (e `radeon.dpm=0`) de propósito: com o gerenciamento de energia ligado, o PS4 trava. A GPU fica no clock fixo, e tudo bem.
 - **`vulkaninfo --summary` dá `ERROR_OUT_OF_HOST_MEMORY` sem monitor.** É a consulta de telas falhando no modo headless, não falta de memória. Use `MESA_VK_DEVICE_SELECT=list vulkaninfo`.
-- **Swap em disco, não.** O sistema inteiro já roda dentro de um arquivo no HD lento do PS4 (`/dev/loop0`); swap ali é lenta e pode travar justamente quando falta memória. Se precisar de swap, use zram (comprimida na RAM, o kernel já tem): há um [script pronto](https://github.com/Roliveira96/host-statation-4-pro/blob/main/scripts/configurar-sistema.sh) no projeto irmão.
-- **O kernel não tem suporte a quota** (`CONFIG_QUOTA` desligado). Para limitar disco por usuário, use uma imagem ext4 em loop para cada um, montada pelo `/etc/fstab`.
+- **Swap em disco, não.** O sistema inteiro já roda dentro de um arquivo no HD lento do PS4 (`/dev/loop0`); swap ali é lenta e pode travar justamente quando falta memória. Se precisar de swap, prefira zram (comprimida na RAM; o kernel já tem suporte).
 - **O ventilador vai trabalhar.** O PS4 fat tem um jato turbofan embutido; trate a pasta térmica com carinho.
 
 ## 🎮 E agora? O que roda nesse PS4

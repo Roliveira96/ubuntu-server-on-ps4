@@ -1,0 +1,11 @@
+# /etc/netplan/02-wifi.yaml on the PS4 (chmod 600, owned by root).
+# The PS4 Marvell Wi-Fi shows up as mlan0. Replace SSID and password.
+network:
+  version: 2
+  renderer: networkd
+  wifis:
+    mlan0:
+      dhcp4: true
+      access-points:
+        "YOUR-SSID":
+          password: "YOUR-PASSWORD"

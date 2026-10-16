@@ -1,0 +1,9 @@
+# Binaries are not versioned: fetch them with download.sh (sources in README.md)
+*.zip
+*.gz
+*.tar.xz
+*.bin
+*.elf
+/kernel/
+/payloads/
+/out/

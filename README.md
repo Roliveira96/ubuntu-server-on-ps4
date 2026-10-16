@@ -12,7 +12,9 @@ git clone <este-repo> ps4-linux && cd ps4-linux
 PS4_IP=192.168.3.105 ./build.sh    # gera e já envia por FTP, conferindo os hashes
 ```
 
-Depois disso, falta só a [instalação na TV](#4-instalar-teclado--tv-uma-vez-é-sério-só-uma).
+Depois disso, falta só a [instalação na TV](#4-instalar-teclado--tv-uma-vez-é-sério-só-uma) e a [pós-instalação](#5-pós-instalação-do-bootou-ao-servidor-de-verdade) (Wi-Fi, IP fixo, GPU, Docker).
+
+> Quer ver o que esse console faz depois de virar servidor? Ele hospeda estagiários no projeto irmão [**PlayStagiário 4**](https://github.com/Roliveira96/host-statation-4-pro).
 
 ---
 
@@ -146,15 +148,112 @@ cd out && find . -type f ! -name SHA256SUMS -printf '%P\n' | while read -r f; do
 4. Faça login e troque a senha provisória.
 5. Desconecte o teclado. A partir daqui é SSH: `ssh <usuario>@<IP-DO-PS4>`.
 
-### 5. Pós-instalação
+### 5. Pós-instalação: do "bootou" ao "servidor de verdade"
 
-| O quê | Como |
-|---|---|
-| **Wi-Fi** | Copie [`examples/02-wifi.yaml.example`](examples/02-wifi.yaml.example) para `/etc/netplan/02-wifi.yaml`, rode `chmod 600` e `sudo netplan apply`. |
-| **IP fixo e hostname** | `sudo bash ps4-setup-static-ip.sh`. Ajuste as variáveis no topo do script antes. |
-| **Docker** | `sudo bash ps4-install-docker.sh` |
-| **Desktop XFCE sob demanda** | `sudo bash ps4-install-xfce.sh`. O boot continua em texto: `desktop` liga a interface gráfica e `desktop-off` desliga. |
-| **Trazer volumes Docker de outra máquina** | `migrate-docker-volumes.sh`. Copia volumes nomeados com os mesmos labels, faz dumps dos bancos e compara checksums. |
+O Ubuntu sobe, mas sai da fábrica só com cabo, IP aleatório e uma GPU que ninguém apresentou ao usuário. Estes são os ajustes que foram feitos neste PS4, na ordem em que fazem sentido. Os scripts ficam na raiz do repositório: copie para o PS4 (`scp ps4-*.sh <usuario>@<IP-DO-PS4>:`) e rode lá. Até o Wi-Fi estar de pé, o SSH é pelo cabo.
+
+#### 5.1. Wi-Fi
+
+O Wi-Fi Marvell aparece como `mlan0` e o firmware já vem no rootfs.
+
+```sh
+sudo nano /etc/netplan/02-wifi.yaml    # cole examples/02-wifi.yaml.example com seu SSID e senha
+sudo chmod 600 /etc/netplan/02-wifi.yaml
+sudo netplan apply
+ip -4 -br addr show mlan0
+```
+
+Se estiver no SSH pelo cabo, pode aplicar sem medo; se estiver no SSH pelo próprio Wi-Fi, prepare-se para reconectar.
+
+#### 5.2. IP fixo e hostname
+
+Ajuste `NEW_HOSTNAME`, `IFACE`, `ADDRESS` e `GATEWAY` no topo do script e rode:
+
+```sh
+sudo bash ps4-setup-static-ip.sh
+```
+
+Ele cria `/etc/netplan/03-static-ip.yaml`, que é mesclado por cima do `02-wifi.yaml` (SSID e senha continuam lá), e aplica em segundo plano. Se o IP mudou, a sessão SSH cai: reconecte no IP novo. O IP fixo é a forma de o `ssh` e o FTP do `build.sh` acharem o console sempre no mesmo lugar.
+
+#### 5.3. GPU: OpenGL e Vulkan
+
+O driver `amdgpu` e o firmware `liverpool_*` já funcionam com o kernel e o rootfs deste repositório. Falta só o lado do usuário:
+
+```sh
+sudo bash ps4-setup-gpu.sh
+exit   # saia e entre de novo no SSH para os grupos valerem
+```
+
+O script instala `mesa-vulkan-drivers`, `mesa-utils` e `vulkan-tools`, põe o usuário nos grupos `video` e `render` e confere tudo. O resultado esperado:
+
+| API | Driver | Como aparece |
+|---|---|---|
+| OpenGL 4.5 / GLES 3.2 | radeonsi (ACO) | `AMD DG1301SML87HY (radeonsi, kaveri, ...)` |
+| Vulkan | RADV | `GPU 0: 1002:9924 ... (RADV KAVERI)` (o `llvmpipe` é a GPU 1, na CPU) |
+
+Sim, ele se apresenta como **kaveri**. O PS4 é parente de APU de notebook e não tem vergonha disso.
+
+#### 5.4. Docker
+
+```sh
+sudo bash ps4-install-docker.sh
+```
+
+Instala o Docker Engine e o plugin Compose pelo repositório oficial (não o `docker.io` do Ubuntu), liga o serviço e põe o usuário no grupo `docker`. Saia e entre de novo. Confira que o cgroup é o certo, porque limites de memória por container dependem disso:
+
+```sh
+docker info --format '{{.CgroupDriver}} {{.CgroupVersion}}'   # systemd 2
+```
+
+#### 5.5. Desktop XFCE sob demanda (opcional)
+
+```sh
+sudo bash ps4-install-xfce.sh
+```
+
+Instala um XFCE mínimo com Xorg + amdgpu, LightDM e Firefox `.deb` (repositório da Mozilla, sem snap). O ponto principal: **o boot continua em modo texto**. O LightDM fica desabilitado e o alvo padrão é `multi-user.target`, porque na maior parte do tempo o PS4 está sem TV, só no SSH. Quando quiser a interface:
+
+```sh
+desktop       # liga o LightDM na TV
+desktop-off   # desliga e devolve a RAM
+```
+
+Não rode `systemctl enable lightdm` nem `set-default graphical.target`: o PS4 passaria a gastar memória com uma tela que ninguém está olhando. Para desktop, também vale usar um payload com mais VRAM (`PAYLOAD=linux-1024mb.bin`).
+
+#### 5.6. HD externo USB (opcional)
+
+Um HD USB em **exFAT** funciona dos dois lados: o PS4 em modo jogo e o Linux leem o mesmo disco (o kernel já tem exFAT embutido). Aqui ele é montado em `/mnt/compartilhado`:
+
+```sh
+sudo apt install -y exfatprogs
+sudo blkid | grep exfat                 # pegue o UUID
+sudo mkdir -p /mnt/compartilhado
+echo 'UUID=XXXX-XXXX /mnt/compartilhado exfat uid=1000,gid=1000,umask=022,nofail,x-systemd.device-timeout=10s 0 0' \
+  | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload && sudo mount /mnt/compartilhado
+ln -s /mnt/compartilhado ~/compartilhado
+```
+
+O `nofail` e o `x-systemd.device-timeout=10s` são obrigatórios: sem eles, um boot com o HD desconectado fica parado esperando o disco e cai no modo de emergência, e você vai precisar de teclado e TV de novo.
+
+#### 5.7. Trazer volumes Docker de outra máquina (opcional)
+
+`migrate-docker-volumes.sh` roda **no computador antigo**: copia volumes nomeados com os mesmos labels, faz dumps dos bancos e compara checksums dos dois lados. Ajuste `REMOTE` e a lista `VOLUMES` antes.
+
+#### 5.8. Conferência final
+
+```sh
+cat /proc/cmdline | grep -o 'amdgpu.dpm=0'               # precisa estar lá
+findmnt -no SOURCE,FSTYPE /                              # /dev/loop0 ext4
+ip -4 -br addr show mlan0                                # IP fixo
+systemctl get-default                                    # multi-user.target
+systemctl is-enabled fstrim.timer                        # enabled
+id -nG | tr ' ' '\n' | grep -E '^(video|render|docker)$'  # três grupos
+eglinfo -B | grep -m1 renderer                           # radeonsi
+docker run --rm hello-world | grep -m1 Hello
+```
+
+Passou em tudo? O PS4 agora é um servidor. Para dar um emprego a ele, veja [🎮 E agora?](#-e-agora-o-que-roda-nesse-ps4).
 
 ---
 
@@ -164,7 +263,19 @@ cd out && find . -type f ! -name SHA256SUMS -printf '%P\n' | while read -r f; do
 - **O BinLoader do GoldHEN (porta 9090) aceita uma única conexão.** Se você testar a porta antes de mandar o payload, gastou a vez dele.
 - **Não instale kernel pelo apt.** O kernel é sempre o `bzImage` em `/data/linux/boot`. Para atualizar, troque esse arquivo.
 - **Tela preta depois do payload?** Confira se o modelo é CUH-10xx/11xx/12xx e se o `bzImage` chegou inteiro (veja o `out/SHA256SUMS`).
+- **Nunca ligue o DPM da GPU.** O kernel sobe com `amdgpu.dpm=0` (e `radeon.dpm=0`) de propósito: com o gerenciamento de energia ligado, o PS4 trava. A GPU fica no clock fixo, e tudo bem.
+- **`vulkaninfo --summary` dá `ERROR_OUT_OF_HOST_MEMORY` sem monitor.** É a consulta de telas falhando no modo headless, não falta de memória. Use `MESA_VK_DEVICE_SELECT=list vulkaninfo`.
+- **Swap em disco, não.** O sistema inteiro já roda dentro de um arquivo no HD lento do PS4 (`/dev/loop0`); swap ali é lenta e pode travar justamente quando falta memória. Se precisar de swap, use zram (comprimida na RAM, o kernel já tem): há um [script pronto](https://github.com/Roliveira96/host-statation-4-pro/blob/main/scripts/configurar-sistema.sh) no projeto irmão.
+- **O kernel não tem suporte a quota** (`CONFIG_QUOTA` desligado). Para limitar disco por usuário, use uma imagem ext4 em loop para cada um, montada pelo `/etc/fstab`.
 - **O ventilador vai trabalhar.** O PS4 fat tem um jato turbofan embutido; trate a pasta térmica com carinho.
+
+## 🎮 E agora? O que roda nesse PS4
+
+Este repositório termina com um Ubuntu Server pronto, sem nenhum serviço de verdade. O que esse PS4 faz da vida está no projeto irmão:
+
+**[🎮 PlayStagiário 4 — host-statation-4-pro](https://github.com/Roliveira96/host-statation-4-pro)**: hospedagem estilo Hostinger para estagiários (site por subdomínio, PHP, MariaDB, phpMyAdmin, painel de arquivos e SSH), tudo em Docker e exposto por um túnel da Cloudflare, sem IP fixo nem porta aberta no roteador.
+
+A ordem é: este repositório (Linux no console) ➜ pós-instalação acima ➜ [instalação do PlayStagiário 4](https://github.com/Roliveira96/host-statation-4-pro/blob/main/docs/instalacao.md).
 
 ## ⚠️ Aviso
 
